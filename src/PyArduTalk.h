@@ -2,7 +2,8 @@
 #define PYARDUTALK_H
 
 #include <Arduino.h>
-#include <HardwareSerial.h>
+// 包含软串口库
+#include <SoftwareSerial.h>
 #include <ArduinoJson.h>
 
 class PyArduTalk {
@@ -35,7 +36,7 @@ public:
     typedef void (*EchoCallback)(const byte* frame, size_t length); // （可选）
 
     // 构造函数
-    PyArduTalk(HardwareSerial& serialPort);
+    PyArduTalk(SoftwareSerial& serialPort);
 
     // 初始化方法
     void begin();
@@ -58,7 +59,7 @@ public:
     void onEchoFrame(EchoCallback callback); // （可选）
 
 private:
-    HardwareSerial& Serial_sw;
+    SoftwareSerial& Serial_sw;
     State currentState;
     byte dataLength;
     byte originalLength;

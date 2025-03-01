@@ -1,7 +1,7 @@
 #include "PyArduTalk.h"
 
-// 构造函数
-PyArduTalk::PyArduTalk(HardwareSerial& serialPort)
+// 构造函数修改为使用SoftwareSerial
+PyArduTalk::PyArduTalk(SoftwareSerial& serialPort)
     : Serial_sw(serialPort), currentState(WAIT_HEADER), dataLength(0), originalLength(0),
       dataType(0), crcIndex(0), dataIndex(0), crcReceived(0), crcCalculated(0),
       lastStateChangeTime(0),
