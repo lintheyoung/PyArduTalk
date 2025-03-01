@@ -87,6 +87,14 @@ private:
     void receiveData(byte incomingByte);
     void floatToBigEndian(float value, byte *buffer);
     float bigEndianToFloat(byte *buffer);
+
+    // 新增超时处理变量
+    unsigned long lastStateChangeTime;
+    const unsigned long FRAME_TIMEOUT = 500; // 500毫秒超时
+    
+    // 新增方法声明
+    void resetStateMachine();
+    bool checkTimeout();
 };
 
 #endif

@@ -4,8 +4,9 @@
 PyArduTalk::PyArduTalk(HardwareSerial& serialPort)
     : Serial_sw(serialPort), currentState(WAIT_HEADER), dataLength(0), originalLength(0),
       dataType(0), crcIndex(0), dataIndex(0), crcReceived(0), crcCalculated(0),
+      lastStateChangeTime(0),
       intCallback(nullptr), floatCallback(nullptr), stringCallback(nullptr), jsonCallback(nullptr),
-      echoCallback(nullptr) { // 初始化回调指针为 nullptr
+      echoCallback(nullptr) {
     // 初始化其他成员变量
 }
 
@@ -15,13 +16,14 @@ void PyArduTalk::begin() {
 }
 
 void PyArduTalk::loop() {
+    // 检查超时
+    checkTimeout();
+    
+    // 读取可用数据
     while (Serial_sw.available()) {
         byte incomingByte = Serial_sw.read();
         receiveData(incomingByte);
     }
-
-    // 您可以在这里添加定时发送数据的逻辑
-    // 例如，每隔一定时间发送浮点数或JSON数据
 }
 
 uint16_t PyArduTalk::calculateCRC16(const byte *data, size_t length) {
@@ -39,7 +41,27 @@ uint16_t PyArduTalk::calculateCRC16(const byte *data, size_t length) {
     return crc;
 }
 
+bool PyArduTalk::checkTimeout() {
+    if (currentState != WAIT_HEADER && millis() - lastStateChangeTime > FRAME_TIMEOUT) {
+        Serial.println(F("Frame reception timeout, resetting state machine"));
+        resetStateMachine();
+        return true;
+    }
+    return false;
+}
+
+void PyArduTalk::resetStateMachine() {
+    currentState = WAIT_HEADER;
+    dataLength = 0;
+    originalLength = 0;
+    dataIndex = 0;
+    crcIndex = 0;
+}
+
 void PyArduTalk::receiveData(byte incomingByte) {
+    // 记录状态改变时间
+    State previousState = currentState;
+    
     switch (currentState) {
         case WAIT_HEADER:
             if (incomingByte == FRAME_HEADER) {
@@ -56,7 +78,7 @@ void PyArduTalk::receiveData(byte incomingByte) {
                 memset(dataBuffer, 0, sizeof(dataBuffer));
                 currentState = READ_TYPE;
             } else {
-                currentState = WAIT_HEADER;
+                resetStateMachine(); // 使用新的重置函数
             }
             break;
         case READ_TYPE:
@@ -66,11 +88,18 @@ void PyArduTalk::receiveData(byte incomingByte) {
             currentState = READ_DATA;
             break;
         case READ_DATA:
-            dataBuffer[dataIndex++] = incomingByte;
-            crcBuffer[crcIndex++] = incomingByte;
-            dataLength -= 1;
-            if (dataLength == 0) {
-                currentState = READ_CRC_HIGH;
+            if (dataIndex < sizeof(dataBuffer)) { // 添加安全检查
+                dataBuffer[dataIndex++] = incomingByte;
+                if (crcIndex < sizeof(crcBuffer)) { // 添加安全检查
+                    crcBuffer[crcIndex++] = incomingByte;
+                }
+                dataLength -= 1;
+                if (dataLength == 0) {
+                    currentState = READ_CRC_HIGH;
+                }
+            } else {
+                // 缓冲区溢出保护
+                resetStateMachine();
             }
             break;
         case READ_CRC_HIGH:
@@ -83,15 +112,20 @@ void PyArduTalk::receiveData(byte incomingByte) {
             if (crcReceived == crcCalculated) {
                 currentState = WAIT_FOOTER;
             } else {
-                currentState = WAIT_HEADER;
+                resetStateMachine();
             }
             break;
         case WAIT_FOOTER:
             if (incomingByte == FRAME_FOOTER) {
                 processFrame();
             }
-            currentState = WAIT_HEADER;
+            resetStateMachine(); // 无论如何都重置状态机，准备下一帧
             break;
+    }
+    
+    // 如果状态改变，更新时间戳
+    if (currentState != previousState) {
+        lastStateChangeTime = millis();
     }
 }
 
