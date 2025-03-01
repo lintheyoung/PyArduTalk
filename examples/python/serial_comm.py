@@ -68,31 +68,82 @@ class SerialComm:
         print(f"发送帧: {' '.join(f'{b:02X}' for b in frame)}")
 
     def read_echo(self):
-        while self.ser.in_waiting:
-            echo = self.ser.read_until(bytes([self.FRAME_FOOTER]))
-            if echo:
-                echo = echo
-                print("接收到回显:", ' '.join(f'{b:02X}' for b in echo))
-                parsed = self.parse_frame(echo)
-                if parsed:
-                    if parsed['type'] == self.TYPE_INT:
-                        received_int = int.from_bytes(parsed['data'], byteorder='big', signed=True)
-                        print(f"解析接收到的整数: {received_int}")
-                    elif parsed['type'] == self.TYPE_FLOAT:
-                        received_float = struct.unpack('>f', parsed['data'])[0]
-                        print(f"解析接收到的浮点数: {received_float}")
-                    elif parsed['type'] == self.TYPE_STRING:
-                        received_str = parsed['data'].decode('utf-8')
-                        print(f"解析接收到的字符串: {received_str}")
-                    elif parsed['type'] == self.TYPE_JSON:
-                        received_json_str = parsed['data'].decode('utf-8')
-                        try:
-                            received_json = json.loads(received_json_str)
-                            print(f"解析接收到的JSON: {received_json}")
-                        except json.JSONDecodeError as e:
-                            print(f"JSON解析错误: {e}")
-                    else:
-                        print("接收到未知类型的数据")
+        # 维护一个内部缓冲区，保存所有读取的数据
+        if not hasattr(self, 'buffer'):
+            self.buffer = bytearray()
+        
+        # 读取所有可用数据到缓冲区
+        while self.ser.in_waiting > 0:
+            self.buffer.extend(self.ser.read(self.ser.in_waiting))
+        
+        # 在缓冲区中寻找并处理所有完整帧
+        while len(self.buffer) > 0:
+            # 寻找帧头
+            header_index = self.buffer.find(bytes([self.FRAME_HEADER]))
+            if header_index == -1:
+                # 没有找到帧头，清空缓冲区
+                self.buffer.clear()
+                break
+                
+            # 如果帧头不在开始位置，丢弃前面的数据
+            if header_index > 0:
+                print(f"丢弃无效数据: {' '.join(f'{b:02X}' for b in self.buffer[:header_index])}")
+                self.buffer = self.buffer[header_index:]
+                
+            # 检查是否至少有帧头和长度字节
+            if len(self.buffer) < 2:
+                # 数据不足，等待下次处理
+                break
+                
+            # 获取length字段 - 这是类型(1字节)和数据的长度
+            length = self.buffer[1]
+            
+            # 计算完整帧所需的字节数: 帧头(1) + 长度(1) + 类型和数据(length) + CRC(2) + 帧尾(1)
+            total_frame_size = 1 + 1 + length + 2 + 1
+            
+            # 确保缓冲区中有完整的帧
+            if len(self.buffer) < total_frame_size:
+                # 数据不足，等待更多数据
+                print(f"帧不完整，等待更多数据，当前: {len(self.buffer)}/{total_frame_size} 字节")
+                break
+                
+            # 检查帧尾
+            if self.buffer[total_frame_size - 1] != self.FRAME_FOOTER:
+                # 帧尾错误，丢弃一个字节并继续寻找
+                print(f"帧尾错误 {self.buffer[total_frame_size - 1]:02X} != {self.FRAME_FOOTER:02X}，丢弃一字节")
+                self.buffer = self.buffer[1:]
+                continue
+                
+            # 提取完整的帧
+            frame = bytes(self.buffer[:total_frame_size])
+            # 从缓冲区中移除已处理的帧
+            self.buffer = self.buffer[total_frame_size:]
+            
+            # 解析帧
+            print(f"尝试解析帧: {' '.join(f'{b:02X}' for b in frame)}")
+            parsed = self.parse_frame(frame)
+            if parsed:
+                # 根据数据类型处理解析结果
+                if parsed['type'] == self.TYPE_INT:
+                    received_int = int.from_bytes(parsed['data'], byteorder='big', signed=True)
+                    print(f"解析接收到的整数: {received_int}")
+                elif parsed['type'] == self.TYPE_FLOAT:
+                    received_float = struct.unpack('>f', parsed['data'])[0]
+                    print(f"解析接收到的浮点数: {received_float}")
+                elif parsed['type'] == self.TYPE_STRING:
+                    received_str = parsed['data'].decode('utf-8')
+                    print(f"解析接收到的字符串: {received_str}")
+                elif parsed['type'] == self.TYPE_JSON:
+                    received_json_str = parsed['data'].decode('utf-8')
+                    try:
+                        received_json = json.loads(received_json_str)
+                        print(f"解析接收到的JSON: {received_json}")
+                    except json.JSONDecodeError as e:
+                        print(f"JSON解析错误: {e}")
+                else:
+                    print(f"接收到未知类型的数据 (类型: {parsed['type']})")
+            else:
+                print(f"帧解析失败，继续寻找下一帧")
 
     def send_int(self, int_value):
         data_bytes = int_value.to_bytes(2, byteorder='big', signed=True)

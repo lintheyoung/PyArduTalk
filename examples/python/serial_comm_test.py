@@ -6,7 +6,7 @@ import json
 
 def main():
     # 替换 'COM7' 为您的串口名称
-    serial_comm = SerialComm('COM7')
+    serial_comm = SerialComm('COM10')
 
     try:
         while True:
