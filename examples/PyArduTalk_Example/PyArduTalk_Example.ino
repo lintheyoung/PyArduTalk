@@ -44,13 +44,10 @@ void setup() {
 
     // 初始化串口用于调试
     Serial.begin(115200);
-    while (!Serial) {
-        ; // 等待串口连接
-    }
     delay(1000); // 确保 Serial 开启
 
     // 初始化 Serial1（UART1）
-    Serial1.begin(115200, SERIAL_8N1, 20, 21);
+    Serial1.begin(115200, SERIAL_8N1, 21, 20);
 
     // 初始化 PyArduTalk
     pyArduTalk.begin();

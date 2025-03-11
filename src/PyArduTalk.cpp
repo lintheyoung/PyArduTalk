@@ -1,13 +1,14 @@
 #include "PyArduTalk.h"
 
-// 构造函数修改为使用SoftwareSerial
-PyArduTalk::PyArduTalk(SoftwareSerial& serialPort)
+// 构造函数
+PyArduTalk::PyArduTalk(HardwareSerial& serialPort)
     : Serial_sw(serialPort), currentState(WAIT_HEADER), dataLength(0), originalLength(0),
       dataType(0), crcIndex(0), dataIndex(0), crcReceived(0), crcCalculated(0),
-      lastStateChangeTime(0),
+      lastStateChangeTime(0), syncBufferIndex(0), syncBufferLength(0),
       intCallback(nullptr), floatCallback(nullptr), stringCallback(nullptr), jsonCallback(nullptr),
       echoCallback(nullptr) {
     // 初始化其他成员变量
+    memset(syncBuffer, 0, SYNC_BUFFER_SIZE);
 }
 
 void PyArduTalk::begin() {
@@ -58,16 +59,67 @@ void PyArduTalk::resetStateMachine() {
     crcIndex = 0;
 }
 
+// 将字节添加到同步缓冲区的辅助方法
+void PyArduTalk::addToSyncBuffer(byte value) {
+    syncBuffer[syncBufferIndex] = value;
+    syncBufferIndex = (syncBufferIndex + 1) % SYNC_BUFFER_SIZE;
+    
+    if (syncBufferLength < SYNC_BUFFER_SIZE) {
+        syncBufferLength++;
+    }
+}
+
+// 在同步缓冲区中从指定位置寻找帧头
+bool PyArduTalk::findFrameHeader(int startPos) {
+    for (int i = 0; i < syncBufferLength - startPos; i++) {
+        int pos = (startPos + i) % SYNC_BUFFER_SIZE;
+        if (syncBuffer[pos] == FRAME_HEADER) {
+            // 帧头需要至少跟随一个长度字节
+            int lengthPos = (pos + 1) % SYNC_BUFFER_SIZE;
+            if (i + 1 < syncBufferLength) {
+                byte length = syncBuffer[lengthPos];
+                // 验证长度是否合理
+                if (length >= 2 && length <= 200) {  // 设置一个合理的最大值
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// 尝试重新同步通信
+bool PyArduTalk::attemptResync() {
+    Serial.println(F("尝试重新同步..."));
+    
+    // 在同步缓冲区中寻找有效帧头
+    if (findFrameHeader(1)) {  // 从当前位置之后开始查找
+        Serial.println(F("找到新的帧头，重新同步成功"));
+        resetStateMachine();
+        return true;
+    }
+    
+    Serial.println(F("未找到新的帧头，重置状态机"));
+    resetStateMachine();
+    return false;
+}
+
 void PyArduTalk::receiveData(byte incomingByte) {
     // 记录状态改变时间
     State previousState = currentState;
     
+    // 将每个接收到的字节添加到同步缓冲区
+    addToSyncBuffer(incomingByte);
+    
+    // 对每个状态实现智能检测和处理
     switch (currentState) {
         case WAIT_HEADER:
             if (incomingByte == FRAME_HEADER) {
                 currentState = READ_LENGTH;
+                Serial.println(F("检测到帧头"));
             }
             break;
+            
         case READ_LENGTH:
             dataLength = incomingByte;
             originalLength = incomingByte;
@@ -77,49 +129,100 @@ void PyArduTalk::receiveData(byte incomingByte) {
                 memset(crcBuffer, 0, sizeof(crcBuffer));
                 memset(dataBuffer, 0, sizeof(dataBuffer));
                 currentState = READ_TYPE;
+                Serial.print(F("帧长度: "));
+                Serial.println(dataLength);
             } else {
-                resetStateMachine(); // 使用新的重置函数
+                Serial.print(F("无效帧长度: "));
+                Serial.println(dataLength);
+                attemptResync();
             }
             break;
+            
         case READ_TYPE:
+            // 随时检查是否收到新帧头
+            if (incomingByte == FRAME_HEADER) {
+                Serial.println(F("在READ_TYPE状态下收到帧头，重新同步"));
+                currentState = READ_LENGTH;
+                break;
+            }
+            
             dataType = incomingByte;
             crcBuffer[crcIndex++] = dataType;
             dataLength -= 1;
             currentState = READ_DATA;
+            Serial.print(F("数据类型: 0x"));
+            Serial.println(dataType, HEX);
             break;
+            
         case READ_DATA:
-            if (dataIndex < sizeof(dataBuffer)) { // 添加安全检查
+            // 随时检查是否收到新帧头
+            if (incomingByte == FRAME_HEADER && dataIndex == 0) {
+                Serial.println(F("在READ_DATA开始时收到帧头，重新同步"));
+                currentState = READ_LENGTH;
+                break;
+            }
+            
+            if (dataIndex < sizeof(dataBuffer)) {
                 dataBuffer[dataIndex++] = incomingByte;
-                if (crcIndex < sizeof(crcBuffer)) { // 添加安全检查
+                if (crcIndex < sizeof(crcBuffer)) {
                     crcBuffer[crcIndex++] = incomingByte;
                 }
                 dataLength -= 1;
+                
                 if (dataLength == 0) {
                     currentState = READ_CRC_HIGH;
                 }
             } else {
-                // 缓冲区溢出保护
-                resetStateMachine();
+                Serial.println(F("数据缓冲区溢出"));
+                attemptResync();
             }
             break;
+            
         case READ_CRC_HIGH:
+            // 随时检查是否收到新帧头
+            if (incomingByte == FRAME_HEADER) {
+                Serial.println(F("在READ_CRC_HIGH状态下收到帧头，重新同步"));
+                currentState = READ_LENGTH;
+                break;
+            }
+            
             crcReceived = incomingByte << 8;
             currentState = READ_CRC_LOW;
             break;
+            
         case READ_CRC_LOW:
+            // 随时检查是否收到新帧头
+            if (incomingByte == FRAME_HEADER) {
+                Serial.println(F("在READ_CRC_LOW状态下收到帧头，重新同步"));
+                currentState = READ_LENGTH;
+                break;
+            }
+            
             crcReceived |= incomingByte;
             crcCalculated = calculateCRC16(crcBuffer, originalLength);
+            
             if (crcReceived == crcCalculated) {
                 currentState = WAIT_FOOTER;
+                Serial.println(F("CRC校验通过"));
             } else {
-                resetStateMachine();
+                Serial.print(F("CRC校验失败: 接收 0x"));
+                Serial.print(crcReceived, HEX);
+                Serial.print(F(", 计算 0x"));
+                Serial.println(crcCalculated, HEX);
+                attemptResync();
             }
             break;
+            
         case WAIT_FOOTER:
             if (incomingByte == FRAME_FOOTER) {
+                Serial.println(F("接收到完整帧"));
                 processFrame();
+            } else {
+                Serial.print(F("帧尾错误: 0x"));
+                Serial.println(incomingByte, HEX);
+                attemptResync();
             }
-            resetStateMachine(); // 无论如何都重置状态机，准备下一帧
+            resetStateMachine();
             break;
     }
     
@@ -218,6 +321,17 @@ void PyArduTalk::echoFrame() {
 
     // 帧尾
     frame[frameIndex++] = FRAME_FOOTER;
+
+    // 输出调试信息
+    Serial.print("发送回显帧: ");
+    for (size_t i = 0; i < frameIndex; i++) {
+        Serial.printf("%02X ", frame[i]);
+    }
+    Serial.println();
+
+    // 显式发送回显数据
+    Serial_sw.write(frame, frameIndex);
+    Serial_sw.flush(); // 确保数据被发送出去
 
     // 调用回调函数（如果设置了）
     if (echoCallback) {

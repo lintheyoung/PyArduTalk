@@ -2,8 +2,7 @@
 #define PYARDUTALK_H
 
 #include <Arduino.h>
-// 包含软串口库
-#include <SoftwareSerial.h>
+#include <HardwareSerial.h>
 #include <ArduinoJson.h>
 
 class PyArduTalk {
@@ -36,7 +35,7 @@ public:
     typedef void (*EchoCallback)(const byte* frame, size_t length); // （可选）
 
     // 构造函数
-    PyArduTalk(SoftwareSerial& serialPort);
+    PyArduTalk(HardwareSerial& serialPort);
 
     // 初始化方法
     void begin();
@@ -59,7 +58,7 @@ public:
     void onEchoFrame(EchoCallback callback); // （可选）
 
 private:
-    SoftwareSerial& Serial_sw;
+    HardwareSerial& Serial_sw;
     State currentState;
     byte dataLength;
     byte originalLength;
@@ -89,13 +88,24 @@ private:
     void floatToBigEndian(float value, byte *buffer);
     float bigEndianToFloat(byte *buffer);
 
-    // 新增超时处理变量
+    // 超时处理变量
     unsigned long lastStateChangeTime;
     const unsigned long FRAME_TIMEOUT = 500; // 500毫秒超时
     
-    // 新增方法声明
+    // 重置状态机
     void resetStateMachine();
     bool checkTimeout();
+    
+    // 添加用于滑动窗口搜索的缓冲区
+    static const int SYNC_BUFFER_SIZE = 32;  // 滑动窗口缓冲区大小
+    byte syncBuffer[SYNC_BUFFER_SIZE];       // 滑动窗口缓冲区
+    int syncBufferIndex;                     // 当前写入位置
+    int syncBufferLength;                    // 缓冲区中有效数据长度
+    
+    // 智能重同步方法
+    bool attemptResync();
+    bool findFrameHeader(int startPos);
+    void addToSyncBuffer(byte value);
 };
 
 #endif
