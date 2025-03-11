@@ -6,9 +6,14 @@ PyArduTalk::PyArduTalk(HardwareSerial& serialPort)
       dataType(0), crcIndex(0), dataIndex(0), crcReceived(0), crcCalculated(0),
       lastStateChangeTime(0), syncBufferIndex(0), syncBufferLength(0),
       intCallback(nullptr), floatCallback(nullptr), stringCallback(nullptr), jsonCallback(nullptr),
-      echoCallback(nullptr) {
+      requestCallback(nullptr), echoCallback(nullptr) {
     // 初始化其他成员变量
     memset(syncBuffer, 0, SYNC_BUFFER_SIZE);
+}
+
+// 添加设置请求回调的方法实现
+void PyArduTalk::onRequestReceived(RequestCallback callback) {
+    requestCallback = callback;
 }
 
 void PyArduTalk::begin() {
@@ -284,6 +289,19 @@ void PyArduTalk::processFrame() {
                     }
                 }
                 // 可选：如果需要处理特定的JSON内容，可以通过回调函数在外部实现
+            }
+            break;
+
+        case TYPE_REQUEST:
+            if ((originalLength - 1) == 1) { // 1字节表示请求的数据类型
+                byte requestedType = dataBuffer[0];
+                Serial.print(F("收到数据请求，类型: 0x"));
+                Serial.println(requestedType, HEX);
+                
+                // 调用请求回调函数
+                if (requestCallback) {
+                    requestCallback(requestedType);
+                }
             }
             break;
 

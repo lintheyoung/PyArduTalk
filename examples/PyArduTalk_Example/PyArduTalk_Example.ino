@@ -4,6 +4,59 @@
 // 创建 PyArduTalk 对象，使用 UART1 (GPIO 20 TX, GPIO 21 RX)
 PyArduTalk pyArduTalk(Serial1);
 
+// 在回调函数定义部分添加
+void handleRequest(byte requestType) {
+    Serial.print("回调 - 收到数据请求，类型: 0x");
+    Serial.println(requestType, HEX);
+    
+    // 根据请求类型返回相应数据
+    switch (requestType) {
+        case PyArduTalk::TYPE_INT:
+            {
+                int16_t value = 42; // 可替换为传感器实际读取值
+                Serial.print("发送整数响应: ");
+                Serial.println(value);
+                pyArduTalk.sendInt(value);
+            }
+            break;
+            
+        case PyArduTalk::TYPE_FLOAT:
+            {
+                float value = 3.14159; // 可替换为传感器实际读取值
+                Serial.print("发送浮点数响应: ");
+                Serial.println(value);
+                pyArduTalk.sendFloat(value);
+            }
+            break;
+            
+        case PyArduTalk::TYPE_STRING:
+            {
+                String value = "Response from ESP32";
+                Serial.print("发送字符串响应: ");
+                Serial.println(value);
+                pyArduTalk.sendString(value);
+            }
+            break;
+            
+        case PyArduTalk::TYPE_JSON:
+            {
+                StaticJsonDocument<256> doc;
+                doc["sensor"] = "temperature";
+                doc["value"] = 25.6;
+                doc["timestamp"] = millis();
+                
+                Serial.println("发送JSON响应");
+                pyArduTalk.sendJson(doc);
+            }
+            break;
+            
+        default:
+            Serial.println("未知的请求类型");
+            break;
+    }
+}
+
+
 // 回调函数定义
 void handleInt(int16_t value) {
     Serial.print("回调 - 接收到整数: ");
@@ -57,6 +110,8 @@ void setup() {
     pyArduTalk.onFloatReceived(handleFloat);
     pyArduTalk.onStringReceived(handleString);
     pyArduTalk.onJsonReceived(handleJson);
+
+    pyArduTalk.onRequestReceived(handleRequest);
 
     // （可选）设置回调函数，用于处理回显帧
     // pyArduTalk.onEchoFrame(handleEchoFrame);

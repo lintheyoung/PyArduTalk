@@ -13,6 +13,7 @@ public:
         TYPE_FLOAT = 0x02,
         TYPE_STRING = 0x03,
         TYPE_JSON = 0x04,
+        TYPE_REQUEST = 0x05,
         // 可以添加更多类型
     };
 
@@ -33,6 +34,7 @@ public:
     typedef void (*StringCallback)(const String&);
     typedef void (*JsonCallback)(const StaticJsonDocument<256>&);
     typedef void (*EchoCallback)(const byte* frame, size_t length); // （可选）
+    typedef void (*RequestCallback)(byte);
 
     // 构造函数
     PyArduTalk(HardwareSerial& serialPort);
@@ -56,6 +58,8 @@ public:
     void onStringReceived(StringCallback callback);
     void onJsonReceived(JsonCallback callback);
     void onEchoFrame(EchoCallback callback); // （可选）
+    // 在public部分添加设置请求回调的方法
+    void onRequestReceived(RequestCallback callback);
 
 private:
     HardwareSerial& Serial_sw;
@@ -69,6 +73,8 @@ private:
     int dataIndex;
     uint16_t crcReceived;
     uint16_t crcCalculated;
+
+    RequestCallback requestCallback;
 
     // 回调函数指针
     IntCallback intCallback;

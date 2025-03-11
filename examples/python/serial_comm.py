@@ -213,6 +213,27 @@ class SerialComm:
         # 等待响应并返回
         return self.read_response()
     
+    def request_int(self):
+        """发送请求获取整数的命令"""
+        print("请求整数数据...")
+        data_bytes = bytes([self.TYPE_INT])
+        self.send_command(self.TYPE_REQUEST, data_bytes)
+        return self.read_response()
+
+    def request_string(self):
+        """发送请求获取字符串的命令"""
+        print("请求字符串数据...")
+        data_bytes = bytes([self.TYPE_STRING])
+        self.send_command(self.TYPE_REQUEST, data_bytes)
+        return self.read_response()
+
+    def request_json(self):
+        """发送请求获取JSON的命令"""
+        print("请求JSON数据...")
+        data_bytes = bytes([self.TYPE_JSON])
+        self.send_command(self.TYPE_REQUEST, data_bytes)
+        return self.read_response()
+
     def read_response(self, timeout=2.0):
         """读取响应数据，带超时机制"""
         start_time = time.time()
