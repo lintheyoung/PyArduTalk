@@ -1,14 +1,66 @@
 #include "PyArduTalk.h"
 
-// 构造函数
+// 在PyArduTalk构造函数的初始化列表中添加
 PyArduTalk::PyArduTalk(HardwareSerial& serialPort)
     : Serial_sw(serialPort), currentState(WAIT_HEADER), dataLength(0), originalLength(0),
       dataType(0), crcIndex(0), dataIndex(0), crcReceived(0), crcCalculated(0),
       lastStateChangeTime(0), syncBufferIndex(0), syncBufferLength(0),
       intCallback(nullptr), floatCallback(nullptr), stringCallback(nullptr), jsonCallback(nullptr),
-      requestCallback(nullptr), echoCallback(nullptr) {
+      requestCallback(nullptr), echoCallback(nullptr), gyroCallback(nullptr) {  // 添加 gyroCallback 初始化
     // 初始化其他成员变量
     memset(syncBuffer, 0, SYNC_BUFFER_SIZE);
+}
+
+void PyArduTalk::sendGyro(float yaw, float roll, float pitch) {
+    // 将浮点数乘以100并转换为int16_t，以保留两位小数
+    int16_t yawInt = (int16_t)(yaw * 100);
+    int16_t rollInt = (int16_t)(roll * 100);
+    int16_t pitchInt = (int16_t)(pitch * 100);
+    
+    // 将三个int16_t值打包成字节数组
+    byte gyroBytes[6]; // 3个int16_t，每个占2字节
+    
+    // 按大端序转换为字节数组
+    gyroBytes[0] = (yawInt >> 8) & 0xFF;
+    gyroBytes[1] = yawInt & 0xFF;
+    gyroBytes[2] = (rollInt >> 8) & 0xFF;
+    gyroBytes[3] = rollInt & 0xFF;
+    gyroBytes[4] = (pitchInt >> 8) & 0xFF;
+    gyroBytes[5] = pitchInt & 0xFF;
+    
+    // 计算数据包长度：类型(1字节) + 数据(6字节)
+    byte length = 1 + 6;
+    
+    // 构建完整帧
+    byte frame[1 + 1 + 1 + 6 + 2 + 1]; // 帧头+长度+类型+数据+CRC(2字节)+帧尾
+    int idx = 0;
+    
+    frame[idx++] = FRAME_HEADER;
+    frame[idx++] = length;
+    frame[idx++] = TYPE_GYRO;
+    
+    // 复制陀螺仪数据
+    memcpy(&frame[idx], gyroBytes, 6);
+    idx += 6;
+    
+    // 计算CRC（包括类型字节和数据）
+    byte crc_input[7]; // 类型(1字节) + 数据(6字节)
+    crc_input[0] = TYPE_GYRO;
+    memcpy(&crc_input[1], gyroBytes, 6);
+    
+    uint16_t crc = calculateCRC16(crc_input, 7);
+    frame[idx++] = highByte(crc);
+    frame[idx++] = lowByte(crc);
+    
+    frame[idx++] = FRAME_FOOTER;
+    
+    // 发送帧
+    Serial_sw.write(frame, idx);
+}
+
+// 添加设置陀螺仪回调的方法实现
+void PyArduTalk::onGyroReceived(GyroCallback callback) {
+    gyroCallback = callback;
 }
 
 // 添加设置请求回调的方法实现
@@ -305,14 +357,35 @@ void PyArduTalk::processFrame() {
             }
             break;
 
+        case TYPE_GYRO:
+            if ((originalLength - 1) == 6) { // 6字节表示三个int16_t
+                // 从大端字节序转换为int16_t
+                int16_t yawInt = (dataBuffer[0] << 8) | dataBuffer[1];
+                int16_t rollInt = (dataBuffer[2] << 8) | dataBuffer[3];
+                int16_t pitchInt = (dataBuffer[4] << 8) | dataBuffer[5];
+                
+                // 转换回浮点数
+                float yaw = yawInt / 100.0f;
+                float roll = rollInt / 100.0f;
+                float pitch = pitchInt / 100.0f;
+                
+                // 调用回调函数
+                if (gyroCallback) {
+                    gyroCallback(yaw, roll, pitch);
+                }
+            }
+            break;
+
         // 处理更多类型
         default:
             // 可选：添加一个通用的回调函数用于处理未知类型的数据
             break;
     }
 
-    // 回显接收到的帧
-    echoFrame();
+    // 关键修改: 只对非请求类型的消息执行回显
+    if (dataType != TYPE_REQUEST) {
+        echoFrame();
+    }
 }
 
 void PyArduTalk::echoFrame() {

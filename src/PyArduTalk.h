@@ -14,6 +14,7 @@ public:
         TYPE_STRING = 0x03,
         TYPE_JSON = 0x04,
         TYPE_REQUEST = 0x05,
+        TYPE_GYRO = 0x06,  // 新增陀螺仪数据类型
         // 可以添加更多类型
     };
 
@@ -35,6 +36,9 @@ public:
     typedef void (*JsonCallback)(const StaticJsonDocument<256>&);
     typedef void (*EchoCallback)(const byte* frame, size_t length); // （可选）
     typedef void (*RequestCallback)(byte);
+
+    // 添加处理陀螺仪数据的回调函数类型定义
+    typedef void (*GyroCallback)(float yaw, float roll, float pitch);
 
     // 构造函数
     PyArduTalk(HardwareSerial& serialPort);
@@ -61,6 +65,11 @@ public:
     // 在public部分添加设置请求回调的方法
     void onRequestReceived(RequestCallback callback);
 
+    // 发送陀螺仪数据
+    void sendGyro(float yaw, float roll, float pitch);
+    // 设置接收陀螺仪数据的回调
+    void onGyroReceived(GyroCallback callback);
+
 private:
     HardwareSerial& Serial_sw;
     State currentState;
@@ -75,6 +84,8 @@ private:
     uint16_t crcCalculated;
 
     RequestCallback requestCallback;
+
+    GyroCallback gyroCallback;
 
     // 回调函数指针
     IntCallback intCallback;

@@ -10,6 +10,7 @@ class SerialComm:
     TYPE_STRING = 0x03
     TYPE_JSON = 0x04  # JSON 类型
     TYPE_REQUEST = 0x05  # 新增请求类型
+    TYPE_GYRO = 0x06  # 新增陀螺仪数据类型
 
     FRAME_HEADER = 0xAA
     FRAME_FOOTER = 0x55
@@ -175,6 +176,22 @@ class SerialComm:
                         print(f"解析接收到的JSON: {result}")
                     except json.JSONDecodeError as e:
                         print(f"JSON解析错误: {e}")
+                elif data_type == self.TYPE_GYRO:
+                    if len(data) == 6:  # 确保有6个字节（3个int16）
+                        yaw_int = int.from_bytes(data[0:2], byteorder='big', signed=True)
+                        roll_int = int.from_bytes(data[2:4], byteorder='big', signed=True)
+                        pitch_int = int.from_bytes(data[4:6], byteorder='big', signed=True)
+                        
+                        # 转换回浮点数并保留两位小数
+                        yaw = round(yaw_int / 100.0, 2)
+                        roll = round(roll_int / 100.0, 2)
+                        pitch = round(pitch_int / 100.0, 2)
+                        
+                        result = {'yaw': yaw, 'roll': roll, 'pitch': pitch}
+                        print(f"解析接收到的陀螺仪数据: {result}")
+                    else:
+                        print(f"陀螺仪数据长度错误: {len(data)}")
+                
                 else:
                     print(f"接收到未知类型的数据 (类型: {data_type})")
                 
@@ -245,6 +262,13 @@ class SerialComm:
         
         print("等待响应超时")
         return None
+
+    def request_gyro(self):
+        """发送请求获取陀螺仪数据的命令"""
+        print("请求陀螺仪数据...")
+        data_bytes = bytes([self.TYPE_GYRO])
+        self.send_command(self.TYPE_REQUEST, data_bytes)
+        return self.read_response()
 
     def send_int(self, int_value):
         data_bytes = int_value.to_bytes(2, byteorder='big', signed=True)
